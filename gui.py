@@ -1,4 +1,5 @@
 import tkinter as tk
+import threading
 from tkinter import filedialog, messagebox, ttk
 from ttkthemes import ThemedStyle
 from scanner import find_duplicates
@@ -28,7 +29,8 @@ class DuplicateFinderApp:
         ttk.Button(frame, text="Browse", command=self.browse_folder).pack(side=tk.RIGHT, padx=5)
 
         # Scan button
-        ttk.Button(root, text="Scan for Duplicates", command=self.scan, style="TButton").pack(pady=10)
+        self.scan_button = ttk.Button(root, text="Scan for Duplicates", command=self.scan)
+        self.scan_button.pack(pady=10)
 
         # Listbox with Scrollbar
         self.list_frame = ttk.Frame(root, padding=10)
@@ -55,28 +57,53 @@ class DuplicateFinderApp:
 
     def browse_folder(self):
         folder_selected = filedialog.askdirectory()
-        self.folder_path.set(folder_selected)
+        if folder_selected:
+            self.folder_path.set(folder_selected)
 
     def scan(self):
+        """Runs the duplicate scanning process in a separate thread to avoid freezing the GUI."""
         directory = self.folder_path.get()
+
         if not directory:
-            messagebox.showwarning("Warning", "Please select a folder!")
+            messagebox.showerror("Error", "Please select a directory!")
             return
 
-        self.duplicates = find_duplicates(directory)
-        self.listbox.delete(0, tk.END)
+        # Disable button while scanning
+        self.scan_button.config(state="disabled", text="Scanning...")
 
-        if not self.duplicates:
-            messagebox.showinfo("Result", "No duplicate files found.")
-            return
+        # Run scanning in a separate thread
+        thread = threading.Thread(target=self.run_scan, args=(directory,))
+        thread.start()
 
-        for i, files in enumerate(self.duplicates, 1):
-            self.listbox.insert(tk.END, f"Set {i}:")
-            for file in files:
-                self.listbox.insert(tk.END, f"  {file}")
+    def run_scan(self, directory):
+        """Runs find_duplicates and updates the UI after scanning."""
+        duplicates = find_duplicates(directory)  # Runs in a separate thread
 
-        self.delete_button.config(state=tk.NORMAL)
-        self.move_button.config(state=tk.NORMAL)
+        # Update UI (must use `after()` to modify UI from a thread)
+        self.root.after(0, self.update_ui, duplicates)
+
+    def update_ui(self, duplicates):
+        """Updates the UI with scan results."""
+        self.scan_button.config(state="normal", text="Scan for Duplicates")
+
+        if duplicates:
+            messagebox.showinfo("Scan Complete", "Duplicate files found!")
+            self.display_results(duplicates)
+            self.duplicates = duplicates  # Store duplicates for deletion/movement
+            self.delete_button.config(state="normal")
+            self.move_button.config(state="normal")
+        else:
+            messagebox.showinfo("Scan Complete", "No duplicates found!")
+
+    def display_results(self, duplicates):
+        """Displays the results in the Listbox."""
+        self.listbox.delete(0, tk.END)  # Clear previous results
+
+        for group in duplicates:
+            self.listbox.insert(tk.END, "Duplicate Group:")
+            for file in group:
+                self.listbox.insert(tk.END, f"  - {file}")
+            self.listbox.insert(tk.END, "")
 
     def delete_duplicates(self):
         delete_duplicates(self.duplicates)
